@@ -346,10 +346,18 @@ class RedmineFileOrganizer:
         """ログをファイルに書き込む"""
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_line = f"[{timestamp}] {message}\n"
             with open(self.LOG_FILE, "a", encoding="utf-8") as f:
-                f.write(f"[{timestamp}] {message}\n")
-        except Exception:
-            pass  # ログ書き込み失敗は無視
+                f.write(log_line)
+        except Exception as e:
+            # ログ書き込み失敗時はデスクトップにフォールバック
+            try:
+                fallback_log = os.path.join(os.path.expanduser("~"), "Desktop", "RedmineFileOrganizer_log.txt")
+                with open(fallback_log, "a", encoding="utf-8") as f:
+                    f.write(f"[LOG ERROR: {e}]\n")
+                    f.write(log_line)
+            except:
+                pass
 
     def get_zone_identifier(self, file_path):
         """ファイルのZone.Identifierを取得"""
@@ -558,6 +566,8 @@ class RedmineFileOrganizer:
             self.write_log("フォルダオープン失敗: パスが空")
             return
 
+        self.write_log(f"フォルダオープン試行: {path}")
+
         def do_open():
             try:
                 # フォルダが存在しない場合は作成
@@ -565,20 +575,25 @@ class RedmineFileOrganizer:
                     os.makedirs(path, exist_ok=True)
                     self.write_log(f"フォルダ作成: {path}")
 
-                # Windows専用: explorer.exe を直接呼び出す（最も確実）
+                # Windows専用: os.startfile を使用（explorer.exeより確実）
                 if sys.platform == 'win32':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    subprocess.Popen(
-                        ['explorer.exe', path],
-                        startupinfo=startupinfo,
-                        creationflags=subprocess.CREATE_NO_WINDOW
-                    )
-                    self.write_log(f"フォルダオープン: {path}")
+                    # パスを正規化
+                    normalized_path = os.path.normpath(path)
+                    self.write_log(f"正規化パス: {normalized_path}")
+
+                    # os.startfile が最も確実
+                    os.startfile(normalized_path)
+                    self.write_log(f"フォルダオープン成功: {normalized_path}")
                 else:
                     subprocess.Popen(['xdg-open', path])
             except Exception as e:
-                self.write_log(f"フォルダオープン失敗: {path} - {e}")
+                self.write_log(f"フォルダオープン失敗: {path} - {type(e).__name__}: {e}")
+                # フォールバック: explorer.exe を直接呼び出す
+                try:
+                    subprocess.run(['explorer.exe', os.path.normpath(path)], check=False)
+                    self.write_log(f"フォールバック成功: explorer.exe {path}")
+                except Exception as e2:
+                    self.write_log(f"フォールバックも失敗: {e2}")
 
         # daemon=True でメインスレッド終了時に自動終了
         thread = threading.Thread(target=do_open, daemon=True)
