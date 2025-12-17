@@ -261,7 +261,6 @@ class DownloadsMonitor:
     def start(self):
         """監視を開始"""
         if not WATCHDOG_AVAILABLE:
-            print("watchdogが利用できません")
             return False
 
         if self.running:
@@ -343,10 +342,17 @@ class RedmineFileOrganizer:
     def get_zone_identifier(self, file_path):
         """ファイルのZone.Identifierを取得"""
         try:
+            # CREATE_NO_WINDOW でコンソールウィンドウを表示しない
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+
             result = subprocess.run(
-                ["powershell", "-Command",
+                ["powershell", "-WindowStyle", "Hidden", "-Command",
                  f"Get-Content -Path '{file_path}' -Stream Zone.Identifier"],
-                capture_output=True
+                capture_output=True,
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             # Try multiple encodings
             output = None
@@ -534,8 +540,8 @@ class RedmineFileOrganizer:
                     os.startfile(path)
                 else:
                     subprocess.Popen(['xdg-open', path])
-            except Exception as e:
-                print(f"フォルダを開けません: {e}")
+            except Exception:
+                pass  # フォルダを開けない場合は無視
 
         # daemon=True でメインスレッド終了時に自動終了
         thread = threading.Thread(target=do_open, daemon=True)
@@ -649,8 +655,7 @@ class RedmineFileOrganizer:
                     # UIの更新はメインスレッドで
                     self.root.after(0, self._on_monitoring_started)
             except Exception as e:
-                print(f"監視開始エラー: {e}")
-                self.root.after(0, lambda: messagebox.showerror("エラー", f"監視開始に失敗: {e}"))
+                self.root.after(0, lambda err=e: messagebox.showerror("エラー", f"監視開始に失敗: {err}"))
 
         thread = threading.Thread(target=do_start, daemon=True)
         thread.start()
