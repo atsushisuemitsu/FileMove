@@ -4,6 +4,11 @@ echo Redmine File Organizer Installer Build
 echo ========================================
 echo.
 
+REM Change to script directory
+cd /d "%~dp0"
+echo Working directory: %CD%
+echo.
+
 REM Inno Setup path check
 set "ISCC="
 if exist "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" (
