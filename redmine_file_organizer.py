@@ -554,18 +554,31 @@ class RedmineFileOrganizer:
 
     def open_folder_safe(self, path):
         """フォルダを安全に開く（フリーズ防止）"""
+        if not path:
+            self.write_log("フォルダオープン失敗: パスが空")
+            return
+
         def do_open():
             try:
                 # フォルダが存在しない場合は作成
                 if not os.path.exists(path):
                     os.makedirs(path, exist_ok=True)
-                # Windows専用: os.startfile を使用（最も安定）
+                    self.write_log(f"フォルダ作成: {path}")
+
+                # Windows専用: explorer.exe を直接呼び出す（最も確実）
                 if sys.platform == 'win32':
-                    os.startfile(path)
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    subprocess.Popen(
+                        ['explorer.exe', path],
+                        startupinfo=startupinfo,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    self.write_log(f"フォルダオープン: {path}")
                 else:
                     subprocess.Popen(['xdg-open', path])
-            except Exception:
-                pass  # フォルダを開けない場合は無視
+            except Exception as e:
+                self.write_log(f"フォルダオープン失敗: {path} - {e}")
 
         # daemon=True でメインスレッド終了時に自動終了
         thread = threading.Thread(target=do_open, daemon=True)
