@@ -498,23 +498,32 @@ class RedmineFileOrganizer:
 
         return None
 
-    def build_target_path(self, parsed_title):
-        """パースしたタイトルから移動先パスを構築"""
+    def build_target_path(self, parsed_title, file_path=None):
+        """パースしたタイトルから移動先パスを構築（日付フォルダ付き）"""
         if not parsed_title:
             return None
+
+        # ダウンロード日を取得（ファイルの更新日時から）
+        if file_path and os.path.exists(file_path):
+            mtime = os.path.getmtime(file_path)
+            date_folder = datetime.fromtimestamp(mtime).strftime("%Y%m%d")
+        else:
+            date_folder = datetime.now().strftime("%Y%m%d")
 
         if parsed_title['levels'] == 3:
             return os.path.join(
                 self.BASE_OUTPUT_FOLDER,
                 parsed_title['folder1'],
                 parsed_title['folder2'],
-                parsed_title['folder3']
+                parsed_title['folder3'],
+                date_folder
             )
         elif parsed_title['levels'] == 2:
             return os.path.join(
                 self.BASE_OUTPUT_FOLDER,
                 parsed_title['folder1'],
-                parsed_title['folder2']
+                parsed_title['folder2'],
+                date_folder
             )
 
         return None
@@ -765,8 +774,8 @@ class RedmineFileOrganizer:
                 self.show_notification("自動整理失敗", f"タイトル形式が認識できません")
                 return
 
-            # 移動先パス構築
-            target_folder = self.build_target_path(parsed)
+            # 移動先パス構築（日付フォルダ付き）
+            target_folder = self.build_target_path(parsed, file_path)
             if not target_folder:
                 self.write_log(f"自動整理失敗: パス構築失敗")
                 return
@@ -1085,8 +1094,8 @@ class RedmineFileOrganizer:
                     f"タイトル形式が認識できません:\n{title}"))
                 return
 
-            # 移動先パス構築
-            target_folder = self.build_target_path(parsed)
+            # 移動先パス構築（日付フォルダ付き）
+            target_folder = self.build_target_path(parsed, self.selected_file['path'])
             if not target_folder:
                 self.root.after(0, lambda: self.on_auto_organize_error("移動先パス構築失敗"))
                 return
@@ -1181,8 +1190,8 @@ class RedmineFileOrganizer:
                     skip_count += 1
                     continue
 
-                # 移動先パス構築
-                target_folder = self.build_target_path(parsed)
+                # 移動先パス構築（日付フォルダ付き）
+                target_folder = self.build_target_path(parsed, file_info['path'])
                 if not target_folder:
                     error_count += 1
                     continue
@@ -1353,7 +1362,9 @@ class RedmineFileOrganizer:
             self.execute_btn.config(state=tk.DISABLED)
             return
 
-        target_path = self.build_target_path(parsed)
+        # 選択ファイルのパスを渡して日付フォルダを含める
+        file_path = self.selected_file['path'] if self.selected_file else None
+        target_path = self.build_target_path(parsed, file_path)
         if not target_path:
             self.preview_label.config(text="パスの構築に失敗しました")
             self.execute_btn.config(state=tk.DISABLED)
@@ -1373,7 +1384,7 @@ class RedmineFileOrganizer:
 
         title = self.title_entry.get().strip()
         parsed = self.parse_ticket_title(title)
-        target_folder = self.build_target_path(parsed)
+        target_folder = self.build_target_path(parsed, self.selected_file['path'])
 
         if not target_folder:
             messagebox.showerror("エラー", "移動先の構築に失敗しました")
