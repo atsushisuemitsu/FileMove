@@ -1,0 +1,12 @@
+{
+  "api": {
+    "url": "https://openrouter.ai/api/v1/chat/completions",
+    "key": "your-api-key-here",
+    "model": "openai/gpt-4o"
+  },
+  "folders": {
+    "watch": "C:/Downloads",
+    "destination": "C:/Organized"
+  },
+  "startup": false
+}
