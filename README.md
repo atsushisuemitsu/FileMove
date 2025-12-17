@@ -98,6 +98,12 @@ python build_exe.py
 
 ### 変更履歴
 
+#### 2024-12-17 (v3)
+- **修正**: ウィンドウ表示時のフリーズ問題を解決
+  - subprocess.runにタイムアウト（5秒）を追加
+  - scan_and_displayを非ブロッキング化（バックグラウンドスレッドで実行）
+  - TimeoutExpired例外ハンドリングを追加
+
 #### 2024-12-17 (v2)
 - **修正**: EXE実行時のコンソールウィンドウ問題を完全解決
   - subprocess呼び出しにCREATE_NO_WINDOWフラグを追加

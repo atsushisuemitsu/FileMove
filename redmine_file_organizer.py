@@ -352,7 +352,8 @@ class RedmineFileOrganizer:
                  f"Get-Content -Path '{file_path}' -Stream Zone.Identifier"],
                 capture_output=True,
                 startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=5
             )
             # Try multiple encodings
             output = None
@@ -363,6 +364,8 @@ class RedmineFileOrganizer:
                 except (UnicodeDecodeError, AttributeError):
                     continue
             return output
+        except subprocess.TimeoutExpired:
+            return None
         except Exception as e:
             return None
 
@@ -1226,9 +1229,21 @@ class RedmineFileOrganizer:
             messagebox.showerror("取得エラー", error or "タイトルを取得できませんでした")
 
     def scan_and_display(self):
-        """スキャンして結果を表示"""
+        """スキャンして結果を表示（非ブロッキング）"""
         self.files_listbox.delete(0, tk.END)
-        self.detected_files = self.scan_downloads_folder()
+        self.files_listbox.insert(tk.END, "(スキャン中...)")
+
+        def do_scan():
+            files = self.scan_downloads_folder()
+            self.root.after(0, lambda: self._update_file_list(files))
+
+        thread = threading.Thread(target=do_scan, daemon=True)
+        thread.start()
+
+    def _update_file_list(self, files):
+        """ファイルリストを更新（メインスレッド）"""
+        self.files_listbox.delete(0, tk.END)
+        self.detected_files = files
 
         if not self.detected_files:
             self.files_listbox.insert(tk.END, "(Redmineからのファイルは見つかりませんでした)")
@@ -1236,11 +1251,14 @@ class RedmineFileOrganizer:
             return
 
         for file_info in self.detected_files:
-            mtime = datetime.fromtimestamp(os.path.getmtime(file_info['path']))
-            issue_num = file_info['info'].get('issue_number')
-            prefix = f"[#{issue_num}] " if issue_num else "[?] "
-            display = f"{prefix}{file_info['filename']} ({mtime.strftime('%m/%d %H:%M')})"
-            self.files_listbox.insert(tk.END, display)
+            try:
+                mtime = datetime.fromtimestamp(os.path.getmtime(file_info['path']))
+                issue_num = file_info['info'].get('issue_number')
+                prefix = f"[#{issue_num}] " if issue_num else "[?] "
+                display = f"{prefix}{file_info['filename']} ({mtime.strftime('%m/%d %H:%M')})"
+                self.files_listbox.insert(tk.END, display)
+            except:
+                pass
 
         self.update_auto_buttons()
 
