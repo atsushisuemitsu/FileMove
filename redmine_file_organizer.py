@@ -318,6 +318,7 @@ class RedmineFileOrganizer:
     DOWNLOADS_FOLDER = os.path.expanduser(r"~\Downloads")
     BASE_OUTPUT_FOLDER = r"D:\@USER"
     REDMINE_HOST = "read-sln.cloud.redmine.jp"
+    LOG_FILE = os.path.join(os.path.expanduser("~"), "RedmineFileOrganizer_log.txt")
 
     def __init__(self):
         self.root = None
@@ -338,6 +339,17 @@ class RedmineFileOrganizer:
         self.monitoring_enabled = None  # GUIで初期化
         self.pending_files = []  # 検出待ちファイル
         self.monitor_status_label = None
+        # ログ初期化
+        self.write_log("=== アプリケーション起動 ===")
+
+    def write_log(self, message):
+        """ログをファイルに書き込む"""
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(self.LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {message}\n")
+        except Exception:
+            pass  # ログ書き込み失敗は無視
 
     def get_zone_identifier(self, file_path):
         """ファイルのZone.Identifierを取得"""
@@ -669,6 +681,7 @@ class RedmineFileOrganizer:
         self.update_monitoring_status()
         if hasattr(self, 'monitor_btn') and self.monitor_btn:
             self.monitor_btn.config(text="監視停止")
+        self.write_log(f"監視開始: {self.DOWNLOADS_FOLDER}")
         # 通知も非ブロッキングで
         threading.Thread(target=lambda: self.show_notification("監視開始", "ダウンロードフォルダの監視を開始しました"), daemon=True).start()
 
@@ -678,6 +691,7 @@ class RedmineFileOrganizer:
             self.monitor.stop()
         self.monitoring_enabled.set(False)
         self.update_monitoring_status()
+        self.write_log("監視停止")
 
     def update_monitoring_status(self):
         """監視状態の表示を更新"""
@@ -697,68 +711,91 @@ class RedmineFileOrganizer:
         filename = os.path.basename(file_path)
         issue_number = info.get('issue_number') if info else None
 
+        # ログ記録
+        self.write_log(f"Redmineファイル検出: {filename} (チケット: #{issue_number if issue_number else '不明'})")
+
         # 通知
         self.show_notification(
             "Redmineファイル検出",
             f"{filename[:40]}...\nチケット: #{issue_number if issue_number else '不明'}"
         )
 
-        # GUIを更新
+        # GUIを更新（ウィンドウが存在する場合のみ）
         if self.root:
-            self.root.after(0, self.scan_and_display)
+            try:
+                self.root.after(0, self.scan_and_display)
+            except Exception:
+                pass
 
         # 自動整理が有効で、ログイン済みで、チケット番号がある場合は自動処理
-        if (self.auto_organize_enabled.get() and
+        # ウィンドウが閉じていても動作するようにthreading.Timerを使用
+        if (self.auto_organize_enabled and self.auto_organize_enabled.get() and
             self.redmine_client.logged_in and
             issue_number):
-            self.root.after(1000, lambda: self.auto_process_file(file_path, info))
+            self.write_log(f"自動整理開始: {filename}")
+            threading.Timer(1.0, lambda: self.auto_process_file(file_path, info)).start()
 
     def auto_process_file(self, file_path, info):
-        """ファイルを自動処理"""
+        """ファイルを自動処理（ウィンドウが閉じていても動作）"""
         if not os.path.exists(file_path):
+            self.write_log(f"自動整理失敗: ファイルが存在しません - {file_path}")
             return
 
         issue_number = info.get('issue_number')
         if not issue_number:
+            self.write_log(f"自動整理失敗: チケット番号なし - {file_path}")
             return
+
+        filename = os.path.basename(file_path)
 
         def do_process():
             # タイトル取得
             title, error = self.redmine_client.get_issue_title(issue_number)
             if not title:
-                self.root.after(0, lambda: self.show_notification(
-                    "自動整理失敗", f"タイトル取得失敗: {error}"))
+                self.write_log(f"自動整理失敗: タイトル取得失敗 - #{issue_number}: {error}")
+                self.show_notification("自動整理失敗", f"タイトル取得失敗: {error}")
                 return
+
+            self.write_log(f"チケットタイトル取得: #{issue_number} - {title}")
 
             # パース
             parsed = self.parse_ticket_title(title)
             if not parsed:
-                self.root.after(0, lambda: self.show_notification(
-                    "自動整理失敗", f"タイトル形式が認識できません"))
+                self.write_log(f"自動整理失敗: タイトル形式不正 - {title}")
+                self.show_notification("自動整理失敗", f"タイトル形式が認識できません")
                 return
 
             # 移動先パス構築
             target_folder = self.build_target_path(parsed)
             if not target_folder:
+                self.write_log(f"自動整理失敗: パス構築失敗")
                 return
 
             # ファイル移動
             success, result = self.move_file(file_path, target_folder)
             if success:
-                self.root.after(0, lambda: self._on_auto_process_complete(result, target_folder))
+                self.write_log(f"ファイル移動成功: {filename} → {target_folder}")
+                self._on_auto_process_complete(result, target_folder)
             else:
-                self.root.after(0, lambda: self.show_notification(
-                    "自動整理失敗", f"ファイル移動失敗"))
+                self.write_log(f"自動整理失敗: ファイル移動失敗 - {result}")
+                self.show_notification("自動整理失敗", f"ファイル移動失敗")
 
-        thread = threading.Thread(target=do_process)
+        thread = threading.Thread(target=do_process, daemon=True)
         thread.start()
 
     def _on_auto_process_complete(self, result, target_folder):
-        """自動処理完了時"""
+        """自動処理完了時（ウィンドウが閉じていても動作）"""
         filename = os.path.basename(result)
         self.show_notification("自動整理完了", f"{filename[:30]}...")
         self.last_target_folder = target_folder
-        self.scan_and_display()
+
+        # GUIを更新（ウィンドウが存在する場合のみ）
+        if self.root:
+            try:
+                self.root.after(0, self.scan_and_display)
+            except Exception:
+                pass
+
         # フォルダを自動で開く
         self.open_folder_safe(target_folder)
 
