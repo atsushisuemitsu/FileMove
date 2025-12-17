@@ -96,6 +96,23 @@ build.bat
 python build_exe.py
 ```
 
+### インストーラー作成
+[Inno Setup 6](https://jrsoftware.org/isdl.php) が必要です。
+
+```bash
+# EXE + インストーラーを一括ビルド
+build_installer.bat
+```
+
+インストーラーの機能：
+- Program Files へのインストール
+- スタートメニューへのショートカット作成
+- デスクトップショートカット（オプション）
+- Windows起動時の自動起動（オプション）
+- アンインストーラー
+
+出力先: `installer_output/RedmineFileOrganizer_Setup_1.0.0.exe`
+
 ### 変更履歴
 
 #### 2024-12-18 (v6)

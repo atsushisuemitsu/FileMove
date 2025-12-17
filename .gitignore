@@ -20,6 +20,9 @@ build/
 dist/
 *.spec
 
+# Installer
+installer_output/
+
 # IDE
 .vscode/
 .idea/
