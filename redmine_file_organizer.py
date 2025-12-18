@@ -1214,37 +1214,34 @@ class RedmineFileOrganizer:
 
         if dialog.result:
             username, password = dialog.result
-            # 一時的に保存（ログイン成功時に保存するため）
-            self._pending_credentials = (username, password)
             self.status_label.config(text="ログイン中...", foreground='orange')
             self.root.update()
 
             # ログイン実行（別スレッドで）
             def do_login():
                 success, message = self.redmine_client.login(username, password)
-                self.root.after(0, lambda: self.on_login_complete(success, message))
+                # ログイン成功時にユーザー名とパスワードを渡す
+                self.root.after(0, lambda: self.on_login_complete(success, message, username, password))
 
             thread = threading.Thread(target=do_login)
             thread.start()
 
-    def on_login_complete(self, success, message):
+    def on_login_complete(self, success, message, username=None, password=None):
         """ログイン完了時のコールバック"""
         if success:
             self.status_label.config(
                 text=f"ログイン中: {self.redmine_client.username}",
                 foreground='green'
             )
-            # ログイン情報を保存
-            if hasattr(self, '_pending_credentials') and self._pending_credentials:
-                username, password = self._pending_credentials
+            # ログイン情報を保存（常に最新の認証情報で更新）
+            if username and password:
                 self.save_credentials(username, password)
-                self._pending_credentials = None
+                self.write_log(f"ログイン情報を更新しました: {username}")
             messagebox.showinfo("ログイン成功", "Redmineにログインしました。\n自動整理機能が使えます。\n\n※ログイン情報を保存しました。次回から自動ログインします。")
             # 自動整理ボタンを有効化
             self.update_auto_buttons()
         else:
             self.status_label.config(text="未ログイン", foreground='gray')
-            self._pending_credentials = None
             messagebox.showerror("ログイン失敗", message)
 
     def update_auto_buttons(self):
