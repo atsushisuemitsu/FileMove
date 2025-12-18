@@ -277,15 +277,42 @@ class DownloadsMonitor:
             def __init__(handler_self, monitor):
                 handler_self.monitor = monitor
 
+            def _should_process(handler_self, file_path):
+                """処理すべきファイルかチェック"""
+                if not file_path:
+                    return False
+                filename = os.path.basename(file_path)
+                # 一時ファイルやシステムファイルをスキップ
+                if filename.startswith('.'):
+                    return False
+                if filename.endswith(('.tmp', '.crdownload', '.partial', '.download')):
+                    return False
+                return True
+
             def on_created(handler_self, event):
+                """ファイル作成イベント"""
                 if not event.is_directory:
                     file_path = event.src_path
-                    # 一時ファイルやシステムファイルをスキップ
-                    filename = os.path.basename(file_path)
-                    if filename.startswith('.') or filename.endswith('.tmp') or filename.endswith('.crdownload'):
-                        return
-                    # 少し待ってからコールバック（ダウンロード完了を待つ）
-                    threading.Timer(2.0, lambda: handler_self.monitor._on_file_created(file_path)).start()
+                    if handler_self._should_process(file_path):
+                        # 少し待ってからコールバック（ダウンロード完了を待つ）
+                        threading.Timer(2.0, lambda: handler_self.monitor._on_file_created(file_path)).start()
+
+            def on_moved(handler_self, event):
+                """ファイル移動/リネームイベント（ダウンロード完了時に発生することが多い）"""
+                if not event.is_directory:
+                    # dest_path が新しいファイル名
+                    file_path = event.dest_path
+                    if handler_self._should_process(file_path):
+                        # リネーム完了後すぐに処理
+                        threading.Timer(1.0, lambda: handler_self.monitor._on_file_created(file_path)).start()
+
+            def on_modified(handler_self, event):
+                """ファイル変更イベント（ダウンロード完了時に発生することがある）"""
+                if not event.is_directory:
+                    file_path = event.src_path
+                    if handler_self._should_process(file_path):
+                        # 変更イベントは頻繁に発生するため、少し長めに待つ
+                        threading.Timer(3.0, lambda: handler_self.monitor._on_file_created(file_path)).start()
 
         self.observer = Observer()
         self.observer.schedule(Handler(self), self.folder_path, recursive=False)
