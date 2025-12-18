@@ -487,26 +487,11 @@ class RedmineFileOrganizer:
             attachment_match = re.search(r'/attachments/(\d+)', referrer)
             attachment_id = attachment_match.group(1) if attachment_match else None
 
-            # チケット番号を複数パターンで抽出
-            filename = os.path.basename(file_path)
+            # チケット番号をReferrerUrlから抽出（信頼性が高い）
             issue_number = None
-
-            # パターン1: bugXXXXX
-            bug_match = re.search(r'bug(\d+)', filename, re.IGNORECASE)
-            if bug_match:
-                issue_number = bug_match.group(1)
-
-            # パターン2: #XXXXX
-            if not issue_number:
-                hash_match = re.search(r'#(\d+)', filename)
-                if hash_match:
-                    issue_number = hash_match.group(1)
-
-            # パターン3: ReferrerUrlからissue番号
-            if not issue_number:
-                issue_match = re.search(r'/issues/(\d+)', referrer)
-                if issue_match:
-                    issue_number = issue_match.group(1)
+            issue_match = re.search(r'/issues/(\d+)', referrer)
+            if issue_match:
+                issue_number = issue_match.group(1)
 
             return True, {
                 'referrer': referrer,
