@@ -396,6 +396,8 @@ class RedmineFileOrganizer:
         self.monitoring_enabled = None  # GUIで初期化
         self.pending_files = []  # 検出待ちファイル
         self.monitor_status_label = None
+        self.notification_label = None  # 通知ラベル
+        self.notification_frame = None  # 通知フレーム
         # ログ初期化
         self.write_log("=== アプリケーション起動 ===")
 
@@ -713,6 +715,50 @@ class RedmineFileOrganizer:
         thread = threading.Thread(target=do_open, daemon=True)
         thread.start()
 
+    def show_move_notification(self, success, filename, target_folder):
+        """移動結果を通知し、3秒後にフォルダを開く"""
+        if not self.root or not self.notification_frame:
+            # GUIがない場合は直接フォルダを開く
+            if success:
+                self.open_folder_safe(target_folder)
+            return
+
+        def do_show():
+            try:
+                if success:
+                    message = f"✅ 移動成功: {filename}\n📁 {target_folder}"
+                    self.notification_frame.config(bg='#4CAF50')
+                    self.notification_label.config(bg='#4CAF50', fg='white', text=message)
+                else:
+                    message = f"❌ 移動失敗: {filename}"
+                    self.notification_frame.config(bg='#f44336')
+                    self.notification_label.config(bg='#f44336', fg='white', text=message)
+
+                # 通知フレームを表示（一番上に）
+                self.notification_frame.pack(fill=tk.X, pady=(0, 10), before=self.notification_frame.master.winfo_children()[1])
+
+                self.write_log(f"通知表示: {message}")
+
+                # 3秒後に通知を非表示にしてフォルダを開く
+                def hide_and_open():
+                    try:
+                        self.notification_frame.pack_forget()
+                        if success:
+                            self.write_log(f"3秒経過、フォルダを開く: {target_folder}")
+                            self.open_folder_safe(target_folder)
+                    except Exception as e:
+                        self.write_log(f"通知非表示/フォルダオープン失敗: {e}")
+
+                self.root.after(3000, hide_and_open)
+            except Exception as e:
+                self.write_log(f"通知表示失敗: {e}")
+                if success:
+                    self.open_folder_safe(target_folder)
+
+        # GUIスレッドで実行
+        if self.root:
+            self.root.after(0, do_show)
+
     def open_preview_folder(self):
         """プレビューに表示されている移動先フォルダを開く"""
         if not self.preview_label:
@@ -947,8 +993,8 @@ class RedmineFileOrganizer:
             except Exception:
                 pass
 
-        # フォルダを自動で開く
-        self.open_folder_safe(target_folder)
+        # 通知表示して3秒後にフォルダを開く
+        self.show_move_notification(True, filename, target_folder)
 
     def show_notification(self, title, message):
         """デスクトップ通知を表示（pystrayのnotify使用）"""
@@ -1005,6 +1051,16 @@ class RedmineFileOrganizer:
         # メインフレーム
         main_frame = ttk.Frame(self.root, padding=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 通知フレーム（画面上部に表示、初期状態では非表示）
+        self.notification_frame = tk.Frame(main_frame, bg='#4CAF50', pady=10)
+        self.notification_label = tk.Label(self.notification_frame, text="",
+                                           font=('Meiryo UI', 11, 'bold'),
+                                           bg='#4CAF50', fg='white',
+                                           wraplength=700, justify=tk.LEFT)
+        self.notification_label.pack(padx=10)
+        # 初期状態では非表示
+        # self.notification_frame.pack() は show_move_notification で呼ぶ
 
         # タイトルとステータス
         header_frame = ttk.Frame(main_frame)
@@ -1270,7 +1326,8 @@ class RedmineFileOrganizer:
     def on_auto_organize_complete(self, success, result, title):
         """自動整理完了時のコールバック"""
         if success:
-            self.progress_label.config(text=f"完了: {os.path.basename(result)}")
+            filename = os.path.basename(result)
+            self.progress_label.config(text=f"完了: {filename}")
             # 移動先フォルダを保存（「出力フォルダを開く」ボタン用）
             self.last_target_folder = os.path.dirname(result)
             # リストを更新（移動したファイルが消える）
@@ -1280,11 +1337,12 @@ class RedmineFileOrganizer:
             self.file_info_label.config(text="")
             self.preview_label.config(text="ファイルを選択してください")
             self.update_auto_buttons()
-            # 移動先フォルダを自動で開く
-            self.open_folder_safe(self.last_target_folder)
+            # 通知表示して3秒後にフォルダを開く
+            self.show_move_notification(True, filename, self.last_target_folder)
         else:
             self.progress_label.config(text="")
             self.update_auto_buttons()
+            self.show_move_notification(False, result, "")
             messagebox.showerror("移動エラー", f"ファイル移動に失敗:\n{result}")
 
     def auto_organize_all(self):
