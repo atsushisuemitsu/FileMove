@@ -178,10 +178,12 @@ class RedmineClient:
 class LoginDialog(tk.Toplevel):
     """ログインダイアログ"""
 
-    def __init__(self, parent, title="Redmine ログイン"):
+    def __init__(self, parent, title="Redmine ログイン", initial_username="", initial_password=""):
         super().__init__(parent)
         self.title(title)
         self.result = None
+        self.initial_username = initial_username
+        self.initial_password = initial_password
 
         # モーダルダイアログとして設定
         self.transient(parent)
@@ -211,12 +213,21 @@ class LoginDialog(tk.Toplevel):
         ttk.Label(frame, text="ユーザー名:").grid(row=0, column=0, sticky=tk.W, pady=5)
         self.username_entry = ttk.Entry(frame, width=30)
         self.username_entry.grid(row=0, column=1, pady=5, padx=(10, 0))
-        self.username_entry.focus_set()
+        if self.initial_username:
+            self.username_entry.insert(0, self.initial_username)
 
         # パスワード
         ttk.Label(frame, text="パスワード:").grid(row=1, column=0, sticky=tk.W, pady=5)
         self.password_entry = ttk.Entry(frame, width=30, show="*")
         self.password_entry.grid(row=1, column=1, pady=5, padx=(10, 0))
+        if self.initial_password:
+            self.password_entry.insert(0, self.initial_password)
+
+        # フォーカス設定（パスワードが空なら、そこにフォーカス）
+        if self.initial_username and not self.initial_password:
+            self.password_entry.focus_set()
+        else:
+            self.username_entry.focus_set()
 
         # ボタン
         btn_frame = ttk.Frame(frame)
@@ -248,14 +259,16 @@ class LoginDialog(tk.Toplevel):
 class DownloadsMonitor:
     """ダウンロードフォルダ監視クラス"""
 
-    def __init__(self, folder_path, callback):
+    def __init__(self, folder_path, callback, log_func=None):
         """
         Args:
             folder_path: 監視するフォルダパス
             callback: 新規ファイル検出時のコールバック関数(file_path)
+            log_func: ログ出力関数（オプション）
         """
         self.folder_path = folder_path
         self.callback = callback
+        self.log_func = log_func
         self.observer = None
         self.running = False
         self.processed_files = set()  # 既に処理したファイルを追跡
@@ -276,6 +289,7 @@ class DownloadsMonitor:
         class Handler(FileSystemEventHandler):
             def __init__(handler_self, monitor):
                 handler_self.monitor = monitor
+                handler_self.log_func = None  # ログ関数を後で設定
 
             def _should_process(handler_self, file_path):
                 """処理すべきファイルかチェック"""
@@ -289,10 +303,17 @@ class DownloadsMonitor:
                     return False
                 return True
 
+            def on_any_event(handler_self, event):
+                """全イベントをログ（デバッグ用）"""
+                if handler_self.log_func and not event.is_directory:
+                    handler_self.log_func(f"[DEBUG] watchdog event: {event.event_type} - {event.src_path}")
+
             def on_created(handler_self, event):
                 """ファイル作成イベント"""
                 if not event.is_directory:
                     file_path = event.src_path
+                    if handler_self.log_func:
+                        handler_self.log_func(f"on_created: {file_path}")
                     if handler_self._should_process(file_path):
                         # 少し待ってからコールバック（ダウンロード完了を待つ）
                         threading.Timer(2.0, lambda: handler_self.monitor._on_file_created(file_path)).start()
@@ -302,6 +323,8 @@ class DownloadsMonitor:
                 if not event.is_directory:
                     # dest_path が新しいファイル名
                     file_path = event.dest_path
+                    if handler_self.log_func:
+                        handler_self.log_func(f"on_moved: {event.src_path} -> {file_path}")
                     if handler_self._should_process(file_path):
                         # リネーム完了後すぐに処理
                         threading.Timer(1.0, lambda: handler_self.monitor._on_file_created(file_path)).start()
@@ -311,11 +334,15 @@ class DownloadsMonitor:
                 if not event.is_directory:
                     file_path = event.src_path
                     if handler_self._should_process(file_path):
+                        if handler_self.log_func:
+                            handler_self.log_func(f"on_modified: {file_path}")
                         # 変更イベントは頻繁に発生するため、少し長めに待つ
                         threading.Timer(3.0, lambda: handler_self.monitor._on_file_created(file_path)).start()
 
+        handler = Handler(self)
+        handler.log_func = self.log_func  # ログ関数を設定
         self.observer = Observer()
-        self.observer.schedule(Handler(self), self.folder_path, recursive=False)
+        self.observer.schedule(handler, self.folder_path, recursive=False)
         self.observer.start()
         self.running = True
         return True
@@ -650,28 +677,35 @@ class RedmineFileOrganizer:
 
         def do_open():
             try:
-                # フォルダが存在しない場合は作成
-                if not os.path.exists(path):
-                    os.makedirs(path, exist_ok=True)
-                    self.write_log(f"フォルダ作成: {path}")
+                # パスを正規化
+                normalized_path = os.path.normpath(path)
 
-                # Windows専用: os.startfile を使用（explorer.exeより確実）
+                # ファイルパスの場合は親ディレクトリを取得
+                if os.path.isfile(normalized_path):
+                    self.write_log(f"ファイルパスが渡されました。親フォルダを開きます: {normalized_path}")
+                    normalized_path = os.path.dirname(normalized_path)
+
+                # フォルダが存在しない場合は作成
+                if not os.path.exists(normalized_path):
+                    os.makedirs(normalized_path, exist_ok=True)
+                    self.write_log(f"フォルダ作成: {normalized_path}")
+
+                # Windows専用: explorer.exe を使用
                 if sys.platform == 'win32':
-                    # パスを正規化
-                    normalized_path = os.path.normpath(path)
                     self.write_log(f"正規化パス: {normalized_path}")
 
-                    # os.startfile が最も確実
-                    os.startfile(normalized_path)
+                    # explorer.exe を直接呼び出す（フォルダとして確実に開く）
+                    subprocess.run(['explorer.exe', normalized_path], check=False)
                     self.write_log(f"フォルダオープン成功: {normalized_path}")
                 else:
-                    subprocess.Popen(['xdg-open', path])
+                    subprocess.Popen(['xdg-open', normalized_path])
             except Exception as e:
                 self.write_log(f"フォルダオープン失敗: {path} - {type(e).__name__}: {e}")
-                # フォールバック: explorer.exe を直接呼び出す
+                # フォールバック: os.startfile を試す
                 try:
-                    subprocess.run(['explorer.exe', os.path.normpath(path)], check=False)
-                    self.write_log(f"フォールバック成功: explorer.exe {path}")
+                    folder_path = os.path.dirname(path) if os.path.isfile(path) else path
+                    os.startfile(os.path.normpath(folder_path))
+                    self.write_log(f"フォールバック成功: os.startfile {folder_path}")
                 except Exception as e2:
                     self.write_log(f"フォールバックも失敗: {e2}")
 
@@ -781,7 +815,7 @@ class RedmineFileOrganizer:
         def do_start():
             try:
                 if self.monitor is None:
-                    self.monitor = DownloadsMonitor(self.DOWNLOADS_FOLDER, self.on_new_file_detected)
+                    self.monitor = DownloadsMonitor(self.DOWNLOADS_FOLDER, self.on_new_file_detected, self.write_log)
 
                 if self.monitor.start():
                     # UIの更新はメインスレッドで
@@ -1115,7 +1149,11 @@ class RedmineFileOrganizer:
                 "pip install requests を実行してください。")
             return
 
-        dialog = LoginDialog(self.root)
+        # 保存済みのログイン情報を読み込んでダイアログにセット
+        saved_username, saved_password = self.load_credentials()
+        dialog = LoginDialog(self.root,
+                            initial_username=saved_username or "",
+                            initial_password=saved_password or "")
         self.root.wait_window(dialog)
 
         if dialog.result:
