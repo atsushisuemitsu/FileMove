@@ -27,6 +27,8 @@ import webbrowser
 import threading
 import time
 import sys
+import json
+import base64
 
 # requestsがない場合
 try:
@@ -319,6 +321,7 @@ class RedmineFileOrganizer:
     BASE_OUTPUT_FOLDER = r"D:\@USER"
     REDMINE_HOST = "read-sln.cloud.redmine.jp"
     LOG_FILE = os.path.join(os.path.expanduser("~"), "RedmineFileOrganizer_log.txt")
+    CONFIG_FILE = os.path.join(os.path.expanduser("~"), "RedmineFileOrganizer_config.json")
 
     def __init__(self):
         self.root = None
@@ -341,6 +344,71 @@ class RedmineFileOrganizer:
         self.monitor_status_label = None
         # ログ初期化
         self.write_log("=== アプリケーション起動 ===")
+
+    def save_credentials(self, username, password):
+        """ログイン情報を保存（パスワードは難読化）"""
+        try:
+            # パスワードを難読化（Base64エンコード）
+            encoded_password = base64.b64encode(password.encode('utf-8')).decode('utf-8')
+            config = {
+                'username': username,
+                'password': encoded_password,
+                'saved_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            with open(self.CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2)
+            self.write_log(f"ログイン情報を保存: {username}")
+        except Exception as e:
+            self.write_log(f"ログイン情報の保存に失敗: {e}")
+
+    def load_credentials(self):
+        """保存されたログイン情報を読み込む"""
+        try:
+            if not os.path.exists(self.CONFIG_FILE):
+                return None, None
+            with open(self.CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            username = config.get('username')
+            encoded_password = config.get('password')
+            if username and encoded_password:
+                password = base64.b64decode(encoded_password.encode('utf-8')).decode('utf-8')
+                self.write_log(f"保存されたログイン情報を読み込み: {username}")
+                return username, password
+        except Exception as e:
+            self.write_log(f"ログイン情報の読み込みに失敗: {e}")
+        return None, None
+
+    def auto_login(self):
+        """保存された情報で自動ログイン"""
+        username, password = self.load_credentials()
+        if username and password:
+            self.write_log(f"自動ログイン試行: {username}")
+
+            def do_login():
+                success, message = self.redmine_client.login(username, password)
+                if self.root:
+                    self.root.after(0, lambda: self._on_auto_login_complete(success, message, username))
+
+            thread = threading.Thread(target=do_login, daemon=True)
+            thread.start()
+            return True
+        return False
+
+    def _on_auto_login_complete(self, success, message, username):
+        """自動ログイン完了時のコールバック"""
+        if success:
+            self.write_log(f"自動ログイン成功: {username}")
+            if self.status_label:
+                self.status_label.config(
+                    text=f"ログイン中: {username}",
+                    foreground='green'
+                )
+            self.update_auto_buttons()
+            self.show_notification("自動ログイン", f"Redmineにログインしました: {username}")
+        else:
+            self.write_log(f"自動ログイン失敗: {message}")
+            if self.status_label:
+                self.status_label.config(text="未ログイン", foreground='gray')
 
     def write_log(self, message):
         """ログをファイルに書き込む"""
@@ -1040,6 +1108,8 @@ class RedmineFileOrganizer:
 
         if dialog.result:
             username, password = dialog.result
+            # 一時的に保存（ログイン成功時に保存するため）
+            self._pending_credentials = (username, password)
             self.status_label.config(text="ログイン中...", foreground='orange')
             self.root.update()
 
@@ -1058,11 +1128,17 @@ class RedmineFileOrganizer:
                 text=f"ログイン中: {self.redmine_client.username}",
                 foreground='green'
             )
-            messagebox.showinfo("ログイン成功", "Redmineにログインしました。\n自動整理機能が使えます。")
+            # ログイン情報を保存
+            if hasattr(self, '_pending_credentials') and self._pending_credentials:
+                username, password = self._pending_credentials
+                self.save_credentials(username, password)
+                self._pending_credentials = None
+            messagebox.showinfo("ログイン成功", "Redmineにログインしました。\n自動整理機能が使えます。\n\n※ログイン情報を保存しました。次回から自動ログインします。")
             # 自動整理ボタンを有効化
             self.update_auto_buttons()
         else:
             self.status_label.config(text="未ログイン", foreground='gray')
+            self._pending_credentials = None
             messagebox.showerror("ログイン失敗", message)
 
     def update_auto_buttons(self):
@@ -1478,6 +1554,9 @@ def main(start_minimized=True):
         # 自動で監視を開始
         if WATCHDOG_AVAILABLE:
             organizer.root.after(1000, organizer.start_monitoring)
+
+        # 保存されたログイン情報で自動ログイン
+        organizer.root.after(1500, organizer.auto_login)
 
         # メインループ
         organizer.root.mainloop()
